@@ -2,12 +2,14 @@ package flam
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/gorilla/mux"
@@ -17,6 +19,9 @@ import (
 const (
 	// RestRegisterTag @todo doc
 	RestRegisterTag = "flam.rest.register"
+
+	// RestServerCreatorTag @todo doc
+	RestServerCreatorTag = "flam.rest.server.creator"
 )
 
 var (
@@ -25,9 +30,6 @@ var (
 
 	// RestServiceConfigPath @todo doc
 	RestServiceConfigPath = EnvString("FLAMINGO_REST_SERVICE_CONFIG_PATH", "flam.rest.service")
-
-	// RestEndpointConfigPath @todo doc
-	RestEndpointConfigPath = EnvString("FLAMINGO_REST_ENDPOINT_CONFIG_PATH", "flam.rest.endpoints.%s")
 
 	// RestPort @todo doc
 	RestPort = EnvInt("FLAMINGO_REST_PORT", 80)
@@ -146,7 +148,68 @@ func (r restRegister) Write(writer http.ResponseWriter, data interface{}) error 
 	return e
 }
 
-type restProcess struct {
+func newRestConfigTLS() *tls.Config {
+	return &tls.Config{
+		MinVersion:       tls.VersionTLS12,
+		CurvePreferences: []tls.CurveID{tls.CurveP521, tls.CurveP384, tls.CurveP256},
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+		},
+	}
+}
+
+// RestServer @todo doc
+type RestServer interface {
+	Run() error
+}
+
+// RestServerCreator @todo doc
+type RestServerCreator interface {
+	Accept(config *Bag) bool
+	Create(config *Bag) (RestServer, error)
+}
+
+// RestServerFactory @todo doc
+type RestServerFactory interface {
+	AddCreator(creator RestServerCreator) RestServerFactory
+	Create(config *Bag) (RestServer, error)
+}
+
+type restServerFactory []RestServerCreator
+
+var _ RestServerFactory = &restServerFactory{}
+
+func newRestServerFactory(
+	args struct {
+		dig.In
+		Creators []RestServerCreator `group:"flam.rest.server.creator"`
+	},
+) RestServerFactory {
+	factory := &restServerFactory{}
+	for _, creator := range args.Creators {
+		*factory = append(*factory, creator)
+	}
+	return factory
+}
+
+func (f *restServerFactory) AddCreator(creator RestServerCreator) RestServerFactory {
+	*f = append(*f, creator)
+	return f
+}
+
+func (f *restServerFactory) Create(config *Bag) (RestServer, error) {
+	for _, creator := range *f {
+		if creator.Accept(config) {
+			return creator.Create(config)
+		}
+	}
+	return nil, NewError("unable to parse server config", Bag{"config": config})
+}
+
+type restServer struct {
 	log        RestLogAdapter
 	handler    http.Handler
 	watchdogID string
@@ -154,31 +217,9 @@ type restProcess struct {
 	termCh     chan os.Signal
 }
 
-var _ WatchdogProcess = &restProcess{}
+var _ RestServer = &restServer{}
 
-func newRestProcess(config Config, logAdapter RestLogAdapter, handler http.Handler) WatchdogProcess {
-	c := struct {
-		Watchdog string
-		Port     int
-	}{
-		Watchdog: "flam.process.rest",
-		Port:     RestPort,
-	}
-	_ = config.Populate(RestConfigPath, &c)
-	return &restProcess{
-		log:        logAdapter,
-		handler:    handler,
-		watchdogID: c.Watchdog,
-		port:       c.Port,
-		termCh:     make(chan os.Signal, 1),
-	}
-}
-
-func (p *restProcess) ID() string {
-	return p.watchdogID
-}
-
-func (p *restProcess) Run() error {
+func (p *restServer) Run() error {
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", p.port),
 		Handler: p.handler,
@@ -190,18 +231,179 @@ func (p *restProcess) Run() error {
 		}
 		_ = p.log.Done(p.watchdogID)
 	}()
+	p.awaitTermination(srv)
+	return nil
+}
+
+func (p *restServer) awaitTermination(srv *http.Server) {
 	signal.Notify(p.termCh, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
-	sig := <-p.termCh
-	_ = sig
+	_ = <-p.termCh
 	_ = p.log.ShutdownGracefully(p.watchdogID)
 	if e := srv.Shutdown(context.Background()); e != nil {
 		_ = p.log.ShutdownError(p.watchdogID, e)
 	}
+}
+
+type restServerCreator struct {
+	log     RestLogAdapter
+	handler http.Handler
+	config  struct {
+		Type       string
+		WatchdogID string
+		Port       int
+	}
+}
+
+var _ RestServerCreator = &restServerCreator{}
+
+func newRestServerCreator(log RestLogAdapter, handler http.Handler) RestServerCreator {
+	return &restServerCreator{
+		log:     log,
+		handler: handler,
+	}
+}
+
+func (sc *restServerCreator) Accept(config *Bag) bool {
+	sc.config.Type = ""
+	sc.config.WatchdogID = ""
+	sc.config.Port = 0
+	if e := config.Populate("", &sc.config); e != nil {
+		return false
+	}
+	return strings.ToLower(sc.config.Type) == "default" &&
+		sc.config.WatchdogID != "" &&
+		sc.config.Port != 0
+}
+
+func (sc *restServerCreator) Create(_ *Bag) (RestServer, error) {
+	return &restServer{
+		log:        sc.log,
+		handler:    sc.handler,
+		watchdogID: sc.config.WatchdogID,
+		port:       sc.config.Port,
+		termCh:     make(chan os.Signal, 1),
+	}, nil
+}
+
+type restServerTLS struct {
+	restServer
+	config *tls.Config
+	cert   string
+	key    string
+}
+
+var _ RestServer = &restServerTLS{}
+
+func (p *restServerTLS) Run() error {
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", p.port),
+		Handler:      p.handler,
+		TLSConfig:    p.config,
+		TLSNextProto: make(map[string]func(*http.Server, *tls.Conn, http.Handler), 0),
+	}
+	go func() {
+		_ = p.log.Start(p.watchdogID)
+		if e := srv.ListenAndServeTLS(p.cert, p.key); e != nil && !errors.Is(e, http.ErrServerClosed) {
+			_ = p.log.Error(p.watchdogID, e)
+		}
+		_ = p.log.Done(p.watchdogID)
+	}()
+	p.awaitTermination(srv)
 	return nil
 }
 
+type restServerTLSCreator struct {
+	log       RestLogAdapter
+	handler   http.Handler
+	tlsConfig *tls.Config
+	config    struct {
+		Type       string
+		WatchdogID string
+		Port       int
+		TLS        struct {
+			Cert string
+			Key  string
+		}
+	}
+}
+
+var _ RestServerCreator = &restServerTLSCreator{}
+
+func newRestServerTLSCreator(log RestLogAdapter, handler http.Handler, tlsConfig *tls.Config) RestServerCreator {
+	return &restServerTLSCreator{
+		log:       log,
+		handler:   handler,
+		tlsConfig: tlsConfig,
+	}
+}
+
+func (sc *restServerTLSCreator) Accept(config *Bag) bool {
+	sc.config.Type = ""
+	sc.config.WatchdogID = ""
+	sc.config.Port = 0
+	sc.config.TLS.Cert = ""
+	sc.config.TLS.Key = ""
+	if e := config.Populate("", &sc.config); e != nil {
+		return false
+	}
+	return strings.ToLower(sc.config.Type) == "tls" &&
+		sc.config.WatchdogID != "" &&
+		sc.config.Port != 0 &&
+		sc.config.TLS.Cert != "" &&
+		sc.config.TLS.Key != ""
+}
+
+func (sc *restServerTLSCreator) Create(_ *Bag) (RestServer, error) {
+	return &restServerTLS{
+		restServer: restServer{
+			log:        sc.log,
+			handler:    sc.handler,
+			watchdogID: sc.config.WatchdogID,
+			port:       sc.config.Port,
+			termCh:     make(chan os.Signal, 1),
+		},
+		config: sc.tlsConfig,
+		cert:   sc.config.TLS.Cert,
+		key:    sc.config.TLS.Key,
+	}, nil
+}
+
+type restProcess struct {
+	factory RestServerFactory
+	server  RestServer
+	config  *Bag
+}
+
+var _ WatchdogProcess = &restProcess{}
+
+func newRestProcess(config Config, factory RestServerFactory) WatchdogProcess {
+	return &restProcess{
+		factory: factory,
+		config:  config.Bag(RestConfigPath, nil),
+	}
+}
+
+func (p *restProcess) ID() string {
+	return p.config.String("WatchdogID", "rest")
+}
+
+func (p *restProcess) Run() error {
+	server, e := p.factory.Create(p.config)
+	if e != nil {
+		return e
+	}
+	p.server = server
+
+	return server.Run()
+}
+
 func (p *restProcess) Terminate() error {
-	p.termCh <- syscall.SIGTERM
+	server, ok := p.server.(*restServer)
+	if !ok {
+		return nil
+	}
+
+	server.termCh <- syscall.SIGTERM
 	return nil
 }
 
@@ -265,6 +467,10 @@ func (p *restProvider) Reg(app App) error {
 	_ = app.DI().Provide(mux.NewRouter)
 	_ = app.DI().Provide(func(handler *mux.Router) http.Handler { return handler })
 	_ = app.DI().Provide(newRestLogAdapter)
+	_ = app.DI().Provide(newRestConfigTLS)
+	_ = app.DI().Provide(newRestServerFactory)
+	_ = app.DI().Provide(newRestServerCreator, dig.Group(RestServerCreatorTag))
+	_ = app.DI().Provide(newRestServerTLSCreator, dig.Group(RestServerCreatorTag))
 	_ = app.DI().Provide(newRestProcess, dig.Group(WatchdogProcessTag))
 	_ = app.DI().Provide(newRestLoader)
 	_ = app.DI().Provide(newRestInitializer)

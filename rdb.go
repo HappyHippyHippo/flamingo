@@ -3,8 +3,12 @@ package flam
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"go.uber.org/dig"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -65,6 +69,130 @@ func (f *rdbDialectFactory) Create(config *Bag) (gorm.Dialector, error) {
 		}
 	}
 	return nil, NewError("unable to parse dialect config", Bag{"config": config})
+}
+
+type sqliteRdbDialectCreator struct {
+	config struct {
+		Dialect string
+		Host    string
+		Params  Bag
+	}
+}
+
+var _ RdbDialectCreator = &sqliteRdbDialectCreator{}
+
+func (dc *sqliteRdbDialectCreator) Accept(config *Bag) bool {
+	dc.config.Host = "localhost"
+	if e := config.Populate("", &dc.config); e != nil {
+		return false
+	}
+	return strings.ToLower(dc.config.Dialect) == "sqlite" &&
+		dc.config.Host != ""
+}
+
+func (dc *sqliteRdbDialectCreator) Create(_ *Bag) (gorm.Dialector, error) {
+	host := dc.config.Host
+	if len(dc.config.Params) > 0 {
+		host += "?"
+		for key, value := range dc.config.Params {
+			host += fmt.Sprintf("&%s=%v", key, value)
+		}
+	}
+	return sqlite.Open(host), nil
+}
+
+type mysqlRdbDialectCreator struct {
+	config struct {
+		Dialect  string
+		Username string
+		Password string
+		Protocol string
+		Host     string
+		Port     int
+		Schema   string
+		Params   Bag
+	}
+}
+
+var _ RdbDialectCreator = &mysqlRdbDialectCreator{}
+
+func (dc *mysqlRdbDialectCreator) Accept(config *Bag) bool {
+	dc.config.Protocol = "tcp"
+	dc.config.Host = "localhost"
+	dc.config.Port = 3306
+	if e := config.Populate("", &dc.config); e != nil {
+		return false
+	}
+	return strings.ToLower(dc.config.Dialect) == "mysql" &&
+		dc.config.Username != "" &&
+		dc.config.Password != "" &&
+		dc.config.Protocol != "" &&
+		dc.config.Host != "" &&
+		dc.config.Schema != ""
+}
+
+func (dc *mysqlRdbDialectCreator) Create(_ *Bag) (gorm.Dialector, error) {
+	host := fmt.Sprintf(
+		"%s:%s@%s(%s:%d)/%s",
+		dc.config.Username,
+		dc.config.Password,
+		dc.config.Protocol,
+		dc.config.Host,
+		dc.config.Port,
+		dc.config.Schema,
+	)
+	if len(dc.config.Params) > 0 {
+		host += "?"
+		for key, value := range dc.config.Params {
+			host += fmt.Sprintf("&%s=%v", key, value)
+		}
+	}
+	return mysql.Open(host), nil
+}
+
+type postgresRdbDialectCreator struct {
+	config struct {
+		Dialect  string
+		Username string
+		Password string
+		Host     string
+		Port     int
+		Schema   string
+		Params   Bag
+	}
+}
+
+var _ RdbDialectCreator = &postgresRdbDialectCreator{}
+
+func (dc *postgresRdbDialectCreator) Accept(config *Bag) bool {
+	dc.config.Host = "localhost"
+	dc.config.Port = 3306
+	if e := config.Populate("", &dc.config); e != nil {
+		return false
+	}
+	return strings.ToLower(dc.config.Dialect) == "postgres" &&
+		dc.config.Username != "" &&
+		dc.config.Password != "" &&
+		dc.config.Host != "" &&
+		dc.config.Schema != ""
+}
+
+func (dc *postgresRdbDialectCreator) Create(_ *Bag) (gorm.Dialector, error) {
+	host := fmt.Sprintf(
+		"user=%s password=%s host=%s port=%d dbname=%s",
+		dc.config.Username,
+		dc.config.Password,
+		dc.config.Host,
+		dc.config.Port,
+		dc.config.Schema,
+	)
+	if len(dc.config.Params) > 0 {
+		host += " "
+		for key, value := range dc.config.Params {
+			host += fmt.Sprintf(" %s=%v", key, value)
+		}
+	}
+	return postgres.Open(host), nil
 }
 
 type rdbConnFactory struct {
@@ -158,14 +286,14 @@ func (p *rdbProvider) Reg(app App) error {
 	_ = app.DI().Provide(func() *gorm.Config { return &gorm.Config{Logger: logger.Discard} })
 	_ = app.DI().Provide(newRdbDialectFactory)
 	_ = app.DI().Provide(newRdbConnFactory)
+	_ = app.DI().Provide(func() RdbDialectCreator { return &sqliteRdbDialectCreator{} }, dig.Group(RdbDialectTag))
+	_ = app.DI().Provide(func() RdbDialectCreator { return &mysqlRdbDialectCreator{} }, dig.Group(RdbDialectTag))
+	_ = app.DI().Provide(func() RdbDialectCreator { return &postgresRdbDialectCreator{} }, dig.Group(RdbDialectTag))
 	_ = app.DI().Provide(newRdbConnPool)
 	_ = app.DI().Provide(func(pool *rdbConnPool) RdbConnPool { return pool })
 	_ = app.DI().Provide(func(pool *rdbConnPool, config *gorm.Config) (*gorm.DB, error) {
 		return pool.Get(RdbPrimaryConnName, config)
 	})
-	for _, dialectCreator := range rdbDialectCreators {
-		_ = app.DI().Provide(dialectCreator, dig.Group(RdbDialectTag))
-	}
 	p.app = app
 	return nil
 }
