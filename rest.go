@@ -384,7 +384,7 @@ func newRestProcess(config Config, factory RestServerFactory) WatchdogProcess {
 }
 
 func (p *restProcess) ID() string {
-	return p.config.String("WatchdogID", "rest")
+	return p.config.String("watchdogid", "flam.process.rest")
 }
 
 func (p *restProcess) Run() error {
