@@ -105,10 +105,20 @@ type Migration interface {
 	Down() error
 }
 
+// Migrator @todo doc
+type Migrator interface {
+	List() []uint64
+	Current() (uint64, error)
+	Up() error
+	Down() error
+}
+
 type migrator struct {
 	dao        *migrationDAO
 	migrations []Migration `group:"flam.migration"`
 }
+
+var _ Migrator = &migrator{}
 
 func newMigrator(
 	args struct {
@@ -116,7 +126,7 @@ func newMigrator(
 		Dao        *migrationDAO
 		Migrations []Migration `group:"flam.migration"`
 	},
-) (*migrator, error) {
+) (Migrator, error) {
 	sort.Slice(args.Migrations, func(i, j int) bool {
 		return args.Migrations[i].Version() < args.Migrations[j].Version()
 	})
@@ -131,6 +141,14 @@ func (m *migrator) AddMigration(migration Migration) {
 	sort.Slice(m.migrations, func(i, j int) bool {
 		return m.migrations[i].Version() < m.migrations[j].Version()
 	})
+}
+
+func (m *migrator) List() []uint64 {
+	var list []uint64
+	for _, migration := range m.migrations {
+		list = append(list, migration.Version())
+	}
+	return list
 }
 
 func (m *migrator) Current() (uint64, error) {
@@ -239,6 +257,7 @@ func (*migrationProvider) ID() string {
 func (p *migrationProvider) Reg(app App) error {
 	_ = app.DI().Provide(newMigrationDao)
 	_ = app.DI().Provide(newMigrator)
+	_ = app.DI().Provide(func(m *migrator) Migrator { return m })
 	_ = app.DI().Provide(newMigrationInitializer)
 	p.app = app
 	return nil
