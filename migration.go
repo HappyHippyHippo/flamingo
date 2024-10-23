@@ -126,7 +126,7 @@ func newMigrator(
 		Dao        *migrationDAO
 		Migrations []Migration `group:"flam.migration"`
 	},
-) (Migrator, error) {
+) (*migrator, error) {
 	sort.Slice(args.Migrations, func(i, j int) bool {
 		return args.Migrations[i].Version() < args.Migrations[j].Version()
 	})
