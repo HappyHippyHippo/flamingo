@@ -270,7 +270,7 @@ func (sc *restServerCreator) Accept(config *Bag) bool {
 	if e := config.Populate("", &sc.config); e != nil {
 		return false
 	}
-	return strings.ToLower(sc.config.Type) == "default" &&
+	return strings.ToLower(sc.config.Type) == "http" &&
 		sc.config.WatchdogID != "" &&
 		sc.config.Port != 0
 }
@@ -346,7 +346,7 @@ func (sc *restServerTLSCreator) Accept(config *Bag) bool {
 	if e := config.Populate("", &sc.config); e != nil {
 		return false
 	}
-	return strings.ToLower(sc.config.Type) == "tls" &&
+	return strings.ToLower(sc.config.Type) == "https" &&
 		sc.config.WatchdogID != "" &&
 		sc.config.Port != 0 &&
 		sc.config.TLS.Cert != "" &&

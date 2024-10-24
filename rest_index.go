@@ -7,6 +7,10 @@ import (
 	"go.uber.org/dig"
 )
 
+var (
+	RestIndexConfigPath = "flam.app"
+)
+
 type restIndexGetResponse struct {
 	App     string `json:"app"`
 	Version string `json:"version"`
@@ -18,9 +22,10 @@ type restIndexService struct {
 }
 
 func newRestIndexService(config Config) *restIndexService {
+	cfg := config.Bag(RestIndexConfigPath, &Bag{})
 	return &restIndexService{
-		app:     config.String("app.name", ""),
-		version: config.String("app.version", ""),
+		app:     cfg.String("name", ""),
+		version: cfg.String("version", ""),
 	}
 }
 
