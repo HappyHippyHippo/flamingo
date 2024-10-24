@@ -125,7 +125,7 @@ var _ WatchdogKennel = &watchdogKennel{}
 func newWatchdogKennel(
 	args struct {
 		dig.In
-		config    Config
+		Config    Config
 		Factory   *watchdogFactory
 		Processes []WatchdogProcess `group:"flam.watchdog.process"`
 	},
@@ -133,7 +133,7 @@ func newWatchdogKennel(
 	k := &watchdogKennel{
 		factory: args.Factory,
 		regs:    map[string]watchdogKennelReg{},
-		config:  args.config.Bag(WatchdogConfigPath, &Bag{}),
+		config:  args.Config.Bag(WatchdogConfigPath, &Bag{}),
 	}
 	for _, p := range args.Processes {
 		if e := k.AddProcess(p); e != nil {
