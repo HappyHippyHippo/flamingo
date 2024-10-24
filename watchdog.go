@@ -123,9 +123,9 @@ type WatchdogKennel interface {
 var _ WatchdogKennel = &watchdogKennel{}
 
 func newWatchdogKennel(
-	config Config,
 	args struct {
 		dig.In
+		config    Config
 		Factory   *watchdogFactory
 		Processes []WatchdogProcess `group:"flam.watchdog.process"`
 	},
