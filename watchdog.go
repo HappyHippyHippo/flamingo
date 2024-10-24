@@ -133,7 +133,7 @@ func newWatchdogKennel(
 	k := &watchdogKennel{
 		factory: args.Factory,
 		regs:    map[string]watchdogKennelReg{},
-		config:  config.Bag(WatchdogConfigPath, &Bag{}),
+		config:  args.config.Bag(WatchdogConfigPath, &Bag{}),
 	}
 	for _, p := range args.Processes {
 		if e := k.AddProcess(p); e != nil {
