@@ -26,8 +26,8 @@ var (
 	// LogLoaderActive @todo doc
 	LogLoaderActive = EnvBool("FLAMINGO_LOG_LOADER_ACTIVE", true)
 
-	// LogLoaderStreamListConfigPath @todo doc
-	LogLoaderStreamListConfigPath = EnvString("FLAMINGO_LOG_LOADER_STREAM_LIST_CONFIG_PATH", "flam.log.streams")
+	// LogLoaderConfigPath @todo doc
+	LogLoaderConfigPath = EnvString("FLAMINGO_LOG_LOADER_CONFIG_PATH", "flam.log")
 
 	// LogFlushFrequency @todo doc
 	LogFlushFrequency = EnvInt("FLAMINGO_LOG_FLUSH_FREQUENCY", 0)
@@ -703,16 +703,16 @@ func (m *logManager) Stream(id string) (LogStream, error) {
 }
 
 type logLoader struct {
-	config        Config
 	streamFactory LogStreamFactory
 	manager       *logManager
+	config        *Bag
 }
 
 func newLogLoader(config Config, streamFactory LogStreamFactory, manager *logManager) *logLoader {
 	return &logLoader{
-		config:        config,
 		manager:       manager,
 		streamFactory: streamFactory,
+		config:        config.Bag(LogLoaderConfigPath, &Bag{}),
 	}
 }
 
@@ -720,11 +720,8 @@ func (l logLoader) load() error {
 	if !LogLoaderActive {
 		return nil
 	}
-	config := Bag{}
-	if e := l.config.Populate(LogLoaderStreamListConfigPath, &config); e != nil {
-		return nil
-	}
-	for id, c := range config {
+
+	for id, c := range *l.config.Bag("streams", &Bag{}) {
 		tc, ok := c.(Bag)
 		if !ok {
 			continue

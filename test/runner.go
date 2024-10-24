@@ -98,14 +98,10 @@ func (r *runner) WithTeardown(f interface{}) Runner {
 // Run @todo doc
 func (r *runner) Run() error {
 	_ = r.app.DI().Invoke(func(kennel flam.WatchdogKennel) {
-		kennel.SetEnabler(func(id string) bool {
-			for _, process := range r.processes {
-				if process == id {
-					return true
-				}
-			}
-			return false
-		})
+		_ = kennel.DisableProcess("rest")
+		for _, id := range r.processes {
+			_ = kennel.EnableProcess(id)
+		}
 	})
 
 	wgBooted := sync.WaitGroup{}

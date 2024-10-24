@@ -379,12 +379,12 @@ var _ WatchdogProcess = &restProcess{}
 func newRestProcess(config Config, factory RestServerFactory) WatchdogProcess {
 	return &restProcess{
 		factory: factory,
-		config:  config.Bag(RestConfigPath, nil),
+		config:  config.Bag(RestConfigPath, &Bag{}),
 	}
 }
 
 func (p *restProcess) ID() string {
-	return p.config.String("watchdogid", "flam.process.rest")
+	return p.config.String("watchdogid", "rest")
 }
 
 func (p *restProcess) Run() error {

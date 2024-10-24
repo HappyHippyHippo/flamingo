@@ -97,7 +97,6 @@ func (a *app) Boot() error {
 	return nil
 }
 
-// Run @todo doc
 func (a *app) Run() error {
 	if e := a.Boot(); e != nil {
 		return e

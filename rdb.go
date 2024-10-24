@@ -22,8 +22,8 @@ var (
 	// RdbPrimaryConnName @todo doc
 	RdbPrimaryConnName = EnvString("FLAMINGO_RDB_PRIMARY_CONN", "primary")
 
-	// RdbConnConfigPath @todo doc
-	RdbConnConfigPath = EnvString("FLAMINGO_RDB_CONN_CONFIG_PATH", "flam.rdb.connections")
+	// RdbConfigPath @todo doc
+	RdbConfigPath = EnvString("FLAMINGO_RDB_CONN_CONFIG_PATH", "flam.rdb")
 )
 
 // RdbDialectCreator @todo doc
@@ -225,18 +225,18 @@ type RdbConnPool interface {
 }
 
 type rdbConnPool struct {
-	config      Config
 	connFactory *rdbConnFactory
 	connections map[string]*gorm.DB
+	config      *Bag
 }
 
 var _ RdbConnPool = &rdbConnPool{}
 
 func newRdbConnPool(config Config, connFactory *rdbConnFactory) *rdbConnPool {
 	return &rdbConnPool{
-		config:      config,
 		connFactory: connFactory,
 		connections: map[string]*gorm.DB{},
+		config:      config.Bag(RdbConfigPath, &Bag{}),
 	}
 }
 
@@ -258,9 +258,7 @@ func (p *rdbConnPool) Get(name string, gormConfig *gorm.Config) (*gorm.DB, error
 }
 
 func (p *rdbConnPool) create(name string, gormConfig *gorm.Config) (*gorm.DB, error) {
-	path := fmt.Sprintf("%s.%s", RdbConnConfigPath, name)
-	config := p.config.Bag(path, &Bag{})
-	conn, e := p.connFactory.create(config, gormConfig)
+	conn, e := p.connFactory.create(p.config.Bag(fmt.Sprintf("connections.%s", name), &Bag{}), gormConfig)
 	if e != nil {
 		return nil, e
 	}

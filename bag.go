@@ -137,7 +137,7 @@ func (b *Bag) List(path string, def []interface{}) []interface{} {
 	return def
 }
 
-// Container @todo doc
+// Bag @todo doc
 func (b *Bag) Bag(path string, def *Bag) *Bag {
 	v := b.Get(path, def)
 	switch typedValue := v.(type) {

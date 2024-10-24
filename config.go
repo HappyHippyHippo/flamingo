@@ -42,8 +42,8 @@ var (
 	// ConfigLoaderSourceID @todo doc
 	ConfigLoaderSourceID = EnvString("FLAMINGO_CONFIG_LOADER_SOURCE_ID", "_sources")
 
-	// ConfigLoaderSourceListPath @todo doc
-	ConfigLoaderSourceListPath = EnvString("FLAMINGO_CONFIG_LOADER_SOURCE_LIST_PATH", "flam.config")
+	// ConfigLoaderConfigPath @todo doc
+	ConfigLoaderConfigPath = EnvString("FLAMINGO_CONFIG_LOADER_CONFIG_PATH", "flam.config")
 
 	// ConfigObserveFrequency @todo doc
 	ConfigObserveFrequency = EnvInt("FLAMINGO_CONFIG_OBSERVE_FREQUENCY", 0)
@@ -1313,13 +1313,13 @@ func (l *configLoader) load() error {
 	if e != nil {
 		return e
 	}
-	if e := l.manager.AddSource(ConfigLoaderSourceID, 0, source); e != nil {
+	if e = l.manager.AddSource(ConfigLoaderSourceID, 0, source); e != nil {
 		return e
 	}
 	config := struct {
 		Sources Bag
 	}{}
-	if e := l.manager.Populate(ConfigLoaderSourceListPath, &config); e != nil {
+	if e := l.manager.Populate(ConfigLoaderConfigPath, &config); e != nil {
 		return nil
 	}
 	for id, c := range config.Sources {

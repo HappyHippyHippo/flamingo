@@ -30,6 +30,8 @@ type RestRunner interface {
 type restRunner struct {
 	runner
 
+	restProcessID string
+
 	request struct {
 		method  string
 		url     string
@@ -46,15 +48,16 @@ type restRunner struct {
 var _ RestRunner = &restRunner{}
 
 // NewRestRunner @todo doc
-func NewRestRunner(t *testing.T, app flam.App, configs ...string) (RestRunner, error) {
+func NewRestRunner(t *testing.T, app flam.App, restProcessID string, configs ...string) (RestRunner, error) {
 	r, e := NewRunner(t, app, configs...)
 	if e != nil {
 		return nil, e
 	}
 	rr := &restRunner{
-		runner: *r.(*runner),
+		runner:        *r.(*runner),
+		restProcessID: restProcessID,
 	}
-	rr.WithProcess("flam.process.rest")
+	rr.WithProcess(rr.restProcessID)
 	return rr, nil
 }
 
@@ -114,7 +117,7 @@ func (r *restRunner) RequestDo() (*http.Response, error) {
 	r.response.e = e
 
 	_ = r.app.DI().Invoke(func(k flam.WatchdogKennel) {
-		p, _ := k.GetProcess("flam.process.rest")
+		p, _ := k.GetProcess(r.restProcessID)
 		_ = p.Terminate()
 	})
 

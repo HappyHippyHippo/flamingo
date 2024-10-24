@@ -1,6 +1,7 @@
 package flam
 
 import (
+	"fmt"
 	"sync"
 
 	"go.uber.org/dig"
@@ -9,6 +10,11 @@ import (
 const (
 	// WatchdogProcessTag @todo doc
 	WatchdogProcessTag = "flam.watchdog.process"
+)
+
+var (
+	// WatchdogConfigPath @todo doc
+	WatchdogConfigPath = EnvString("FLAMINGO_WATCHDOG_CONFIG_PATH", "flam.watchdog")
 )
 
 // WatchdogLogAdapter @todo doc
@@ -94,31 +100,30 @@ func (f *watchdogFactory) create() *watchdog {
 	}
 }
 
-// WatchdogProcessEnabler @todo doc
-type WatchdogProcessEnabler func(id string) bool
-
 type watchdogKennelReg struct {
 	process  WatchdogProcess
 	watchdog *watchdog
 }
 
 type watchdogKennel struct {
-	enabler WatchdogProcessEnabler
 	factory *watchdogFactory
 	regs    map[string]watchdogKennelReg
+	config  *Bag
 }
 
 // WatchdogKennel @todo doc
 type WatchdogKennel interface {
-	SetEnabler(enabler WatchdogProcessEnabler) WatchdogKennel
 	AddProcess(process WatchdogProcess) error
 	GetProcess(id string) (WatchdogProcess, error)
+	EnableProcess(id string) error
+	DisableProcess(id string) error
 	Run() error
 }
 
 var _ WatchdogKennel = &watchdogKennel{}
 
 func newWatchdogKennel(
+	config Config,
 	args struct {
 		dig.In
 		Factory   *watchdogFactory
@@ -128,6 +133,7 @@ func newWatchdogKennel(
 	k := &watchdogKennel{
 		factory: args.Factory,
 		regs:    map[string]watchdogKennelReg{},
+		config:  config.Bag(WatchdogConfigPath, &Bag{}),
 	}
 	for _, p := range args.Processes {
 		if e := k.AddProcess(p); e != nil {
@@ -135,11 +141,6 @@ func newWatchdogKennel(
 		}
 	}
 	return k, nil
-}
-
-func (k *watchdogKennel) SetEnabler(enabler WatchdogProcessEnabler) WatchdogKennel {
-	k.enabler = enabler
-	return k
 }
 
 func (k *watchdogKennel) AddProcess(process WatchdogProcess) error {
@@ -162,6 +163,14 @@ func (k *watchdogKennel) GetProcess(id string) (WatchdogProcess, error) {
 	return p.process, nil
 }
 
+func (k *watchdogKennel) EnableProcess(id string) error {
+	return k.config.Set(fmt.Sprintf("%s.enabled", id), true)
+}
+
+func (k *watchdogKennel) DisableProcess(id string) error {
+	return k.config.Set(fmt.Sprintf("%s.enabled", id), false)
+}
+
 func (k *watchdogKennel) Run() error {
 	if len(k.regs) == 0 {
 		return nil
@@ -169,9 +178,10 @@ func (k *watchdogKennel) Run() error {
 	var result error
 	wg := sync.WaitGroup{}
 	for id, reg := range k.regs {
-		if k.enabler != nil && !k.enabler(id) {
+		if k.config.Bool(fmt.Sprintf("%s.enabled", id), false) == false {
 			continue
 		}
+
 		wg.Add(1)
 		go func(reg watchdogKennelReg) {
 			defer wg.Done()
